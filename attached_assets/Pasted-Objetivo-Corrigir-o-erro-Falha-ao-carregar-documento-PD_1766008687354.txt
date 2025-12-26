@@ -1,0 +1,65 @@
+Objetivo:
+Corrigir o erro “Falha ao carregar documento PDF” e preparar toda a estrutura do projeto para deploy em GitHub, Vercel e Render, deixando o backend pronto para integração com RIPE Atlas.
+
+Tarefas obrigatórias:
+
+1. Corrigir a geração do PDF:
+- Garantir que o PDF seja gerado como um arquivo válido (application/pdf).
+- NÃO salvar ou abrir JSON bruto como PDF.
+- Usar jsPDF (ou equivalente) com geração correta de texto e tabelas.
+- Converter os dados do diagnóstico (probes, região, IP, ASN, ISP, latência e status) em tabela antes de gerar o PDF.
+- Garantir que o botão “Baixar Relatório PDF” funcione em todos os navegadores (Blob + URL.createObjectURL ou doc.save).
+- O PDF deve abrir normalmente sem apresentar “Falha ao carregar documento PDF”.
+
+2. Estrutura do projeto (Fullstack-ready):
+- Separar claramente:
+  /frontend (React ou Vite)
+  /backend (Node.js + Express)
+- Garantir que o frontend funcione de forma estática (compatível com Vercel).
+- Garantir que o backend funcione de forma independente (compatível com Render).
+
+3. Preparação para deploy:
+- Adicionar scripts adequados no package.json:
+  - build
+  - start
+- Garantir uso de variáveis de ambiente (.env) para:
+  - RIPE_ATLAS_API_KEY
+  - BACKEND_URL
+- Não deixar chaves sensíveis no frontend.
+
+4. Preparação para RIPE Atlas (sem executar ainda):
+- Criar serviço isolado ripeService.js no backend.
+- Estruturar funções para:
+  - Criar medições DNS / Ping / Traceroute
+  - Selecionar probes automaticamente por:
+    - país (ex: BR)
+    - ASN (AWS, Azure, Google)
+    - ou global
+- Preparar suporte para limites altos de probes (ex: 100, 500, 1000+), sem travar o frontend.
+- Implementar polling ou webhook-ready para coletar resultados posteriormente.
+
+5. API Backend:
+- Criar endpoint:
+  POST /diagnosticar
+  Payload:
+  {
+    "dominio": "exemplo.com",
+    "escopo": "BR | GLOBAL | AWS | AZURE",
+    "limite": 1000
+  }
+- No modo atual, retornar dados mockados estruturados exatamente como virão do RIPE Atlas.
+- O frontend deve funcionar sem precisar de alteração quando o RIPE Atlas for ativado.
+
+6. Código limpo e produção:
+- Tratar erros corretamente (try/catch).
+- Nunca retornar PDF inválido.
+- Garantir que o projeto esteja pronto para:
+  - subir no GitHub
+  - deploy automático no Vercel (frontend)
+  - deploy automático no Render (backend)
+
+Resultado esperado:
+- PDF funcionando corretamente.
+- Frontend estável.
+- Backend preparado para RIPE Atlas.
+- Estrutura pronta para ativar testes automáticos com +1000 ISPs apenas adicionando a API Key do RIPE Atlas.

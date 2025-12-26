@@ -1,0 +1,29 @@
+2025-12-19T01:45:07.262681641Z ==> It looks like we don't have access to your repo, but we'll try to clone it anyway.
+2025-12-19T01:45:07.262943898Z ==> Cloning from https://github.com/gxfn33157/leste-diagnostico
+2025-12-19T01:45:07.684505875Z ==> Checking out commit ccb75d21077bed0e82f877f465e0fb44be2e6548 in branch main
+2025-12-19T01:45:09.320455372Z ==> Using Node.js version 22.16.0 (default)
+2025-12-19T01:45:09.354323116Z ==> Docs on specifying a Node.js version: https://render.com/docs/node-version
+2025-12-19T01:45:12.849844819Z ==> Running build command 'npm install && npm run build'...
+2025-12-19T01:45:17.832465681Z 
+2025-12-19T01:45:17.832491152Z added 109 packages, and audited 110 packages in 4s
+2025-12-19T01:45:17.832501602Z 
+2025-12-19T01:45:17.832516913Z 17 packages are looking for funding
+2025-12-19T01:45:17.832522733Z   run `npm fund` for details
+2025-12-19T01:45:17.833446726Z 
+2025-12-19T01:45:17.833464476Z found 0 vulnerabilities
+2025-12-19T01:45:18.080021046Z 
+2025-12-19T01:45:18.080043937Z > rest-express@1.0.0 build
+2025-12-19T01:45:18.080047327Z > tsc -p tsconfig.server.json
+2025-12-19T01:45:18.080050037Z 
+2025-12-19T01:45:19.607067651Z server/index.ts(2,18): error TS2307: Cannot find module 'cors' or its corresponding type declarations.
+2025-12-19T01:45:19.607210445Z server/index.ts(20,1): error TS2554: Expected 2 arguments, but got 1.
+2025-12-19T01:45:19.607225495Z server/storage.ts(6,8): error TS6059: File '/opt/render/project/src/shared/schema.ts' is not under 'rootDir' '/opt/render/project/src/server'. 'rootDir' is expected to contain all source files.
+2025-12-19T01:45:19.607231365Z   The file is in the program because:
+2025-12-19T01:45:19.607235935Z     Imported via "../shared/schema.js" from file '/opt/render/project/src/server/storage.ts'
+2025-12-19T01:45:19.607240715Z     Imported via '../../shared/schema.js' from file '/opt/render/project/src/server/services/ripeService.ts'
+2025-12-19T01:45:19.607244806Z   File is ECMAScript module because '/opt/render/project/src/package.json' has field "type" with value "module"
+2025-12-19T01:45:19.607375499Z shared/schema.ts(1,21): error TS2307: Cannot find module 'drizzle-orm' or its corresponding type declarations.
+2025-12-19T01:45:19.607388029Z shared/schema.ts(2,75): error TS2307: Cannot find module 'drizzle-orm/pg-core' or its corresponding type declarations.
+2025-12-19T01:45:19.6074063Z shared/schema.ts(3,36): error TS2307: Cannot find module 'drizzle-zod' or its corresponding type declarations.
+2025-12-19T01:45:19.773329051Z ==> Build failed 😞
+2025-12-19T01:45:19.773347082Z ==> Common ways to troubleshoot your deploy: https://render.com/docs/troubleshooting-deploys
