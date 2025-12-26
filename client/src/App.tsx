@@ -15,12 +15,21 @@ function Router() {
   );
 }
 
+function Watermark() {
+  return (
+    <div className="fixed bottom-4 right-4 z-40 text-xs text-muted-foreground/50 hover:text-muted-foreground/70 transition-colors pointer-events-none select-none">
+      <p className="font-light">Created by Geovanne Ferreira</p>
+    </div>
+  );
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <Toaster />
         <Router />
+        <Watermark />
       </TooltipProvider>
     </QueryClientProvider>
   );
