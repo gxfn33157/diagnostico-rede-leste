@@ -26,49 +26,48 @@ export class GlobalpingService {
     try {
       console.log(`[GlobalPing] Iniciando diagnóstico: ${dominio} (${escopo}, ${limite} locais)`);
 
+      // Validar se o domínio é válido
+      if (!this.isValidDomain(dominio)) {
+        throw new Error(`Domínio inválido: ${dominio}`);
+      }
+
       const locations = this.getLocations(escopo, limite);
       console.log(`[GlobalPing] Usando ${locations.length} locais`);
 
-      const resultados: ProbeResult[] = [];
-
-      // Gerar resultados para cada localização (DNS + Ping)
-      for (let i = 0; i < locations.length; i++) {
-        const location = locations[i];
-        const latenciaNum = 15 + Math.random() * 80;
-        const perdaPacotes = Math.random() > 0.95 ? (Math.random() > 0.5 ? "1-5%" : ">5%") : "0%";
-        const velocidade = latenciaNum < 30 ? "Rápida" : latenciaNum < 60 ? "Normal" : "Lenta";
-        const acessibilidade = perdaPacotes === "0%" ? "Acessível globalmente" : perdaPacotes === "1-5%" ? "Tempo de resposta lento" : "Inacessível - Problema na rota";
-        
-        resultados.push({
-          probe_id: i,
-          region: location,
-          ip: `142.251.${Math.floor(Math.random() * 256)}.${Math.floor(Math.random() * 256)}`,
-          asn: `AS${15169 + (i % 100)}`,
-          isp: this.getISPForLocation(location),
-          acessibilidade: acessibilidade,
-          latencia: `${Math.round(latenciaNum)}ms`,
-          velocidade: velocidade,
-          perda_pacotes: perdaPacotes,
-          certificado_ssl: "Válido",
-          status: perdaPacotes === "0%" ? 'OK' : perdaPacotes === "1-5%" ? 'AVISO' : 'ERRO',
-        });
+      // Fazer requisições reais à API GlobalPing
+      const dnsResults = await this.executeDNS(dominio, locations);
+      
+      if (dnsResults.length === 0) {
+        throw new Error(`Domínio ${dominio} não foi resolvido. Verifique se o domínio existe.`);
       }
 
-      const resumo = `Diagnóstico completado com ${resultados.length} medições de ${locations.length} locais`;
+      const pingResults = await this.executePing(dominio, locations);
+      
+      // Combinar resultados
+      const allResults = [...dnsResults, ...pingResults];
+      
+      const resumo = allResults.length > 0 
+        ? `Diagnóstico completado com ${allResults.length} medições de ${locations.length} locais`
+        : `Nenhum resultado disponível para ${dominio}`;
 
       return {
         resumo,
-        resultados,
-        totalProbes: locations.length,
+        resultados: allResults,
+        totalProbes: allResults.length,
       };
     } catch (error) {
       console.error('[GlobalPing] Erro:', error);
-      return {
-        resumo: 'Erro ao executar diagnóstico via GlobalPing',
-        resultados: [],
-        totalProbes: 0,
-      };
+      throw new Error(
+        error instanceof Error 
+          ? error.message 
+          : 'Erro ao executar diagnóstico via GlobalPing'
+      );
     }
+  }
+
+  private isValidDomain(dominio: string): boolean {
+    const domainRegex = /^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/;
+    return domainRegex.test(dominio);
   }
 
   private getLocations(escopo: string, limite: number): string[] {
@@ -92,6 +91,7 @@ export class GlobalpingService {
 
   private async executeDNS(dominio: string, locations: string[]): Promise<ProbeResult[]> {
     const resultados: ProbeResult[] = [];
+    let successCount = 0;
 
     for (let i = 0; i < locations.length; i++) {
       const location = locations[i];
@@ -122,21 +122,17 @@ export class GlobalpingService {
             latencia: result.result.timeTaken ? `${Math.round(result.result.timeTaken)}ms` : '0ms',
             status: 'OK',
           });
+          successCount++;
+        } else {
+          console.log(`[GlobalPing DNS] Sem resposta para ${dominio} em ${location}`);
         }
       } catch (error: any) {
         console.log(`[GlobalPing DNS] Erro em ${location}:`, error.message);
-        // Retornar dados simulados para demonstração
-        resultados.push({
-          probe_id: i,
-          region: location,
-          ip: `142.251.${Math.floor(Math.random() * 256)}.${Math.floor(Math.random() * 256)}`,
-          asn: 'AS' + (15169 + i),
-          isp: this.getISPForLocation(location),
-          reverse_dns: dominio,
-          latencia: `${Math.round(20 + Math.random() * 50)}ms`,
-          status: 'OK',
-        });
       }
+    }
+
+    if (successCount === 0) {
+      throw new Error(`Não foi possível resolver o domínio ${dominio}. Verifique se ele existe.`);
     }
 
     return resultados;
@@ -173,20 +169,11 @@ export class GlobalpingService {
             latencia: `${Math.round(result.result.stats.avg || 0)}ms`,
             status: result.result.stats.avg ? 'OK' : 'ERRO',
           });
+        } else if (result?.result?.error) {
+          console.log(`[GlobalPing Ping] Falha ao pingar ${target} em ${location}: ${result.result.error}`);
         }
       } catch (error: any) {
         console.log(`[GlobalPing Ping] Erro em ${location}:`, error.message);
-        // Retornar dados simulados para demonstração
-        resultados.push({
-          probe_id: i + 100,
-          region: location,
-          ip: `142.251.${Math.floor(Math.random() * 256)}.${Math.floor(Math.random() * 256)}`,
-          asn: 'AS' + (15169 + i),
-          isp: this.getISPForLocation(location),
-          reverse_dns: target,
-          latencia: `${Math.round(15 + Math.random() * 80)}ms`,
-          status: 'OK',
-        });
       }
     }
 
