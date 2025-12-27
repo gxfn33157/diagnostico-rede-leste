@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { promises as dns } from 'dns';
 import type { ProbeResult } from '@shared/schema';
 
 const GLOBALPING_API = 'https://api.globalping.io';
@@ -29,6 +30,12 @@ export class GlobalpingService {
       // Validar se o domínio é válido (essencial!)
       if (!this.isValidDomain(dominio)) {
         throw new Error(`Domínio inválido: ${dominio}`);
+      }
+
+      // Validar se o domínio realmente existe (DNS lookup real)
+      const domainExists = await this.validateDomainExists(dominio);
+      if (!domainExists) {
+        throw new Error(`Domínio não existe ou não foi resolvido: ${dominio}. Verifique se o domínio está correto.`);
       }
 
       const locations = this.getLocations(escopo, limite);
@@ -62,6 +69,17 @@ export class GlobalpingService {
           ? error.message 
           : 'Erro ao executar diagnóstico via GlobalPing'
       );
+    }
+  }
+
+  private async validateDomainExists(dominio: string): Promise<boolean> {
+    try {
+      const addresses = await dns.resolve4(dominio);
+      console.log(`[GlobalPing] Domínio ${dominio} resolvido para:`, addresses);
+      return addresses.length > 0;
+    } catch (error: any) {
+      console.log(`[GlobalPing] Falha ao validar domínio ${dominio}:`, error.message);
+      return false;
     }
   }
 
@@ -118,7 +136,6 @@ export class GlobalpingService {
 
   private async executeDNS(dominio: string, locations: string[]): Promise<ProbeResult[]> {
     const resultados: ProbeResult[] = [];
-    let successCount = 0;
 
     for (let i = 0; i < locations.length; i++) {
       const location = locations[i];
@@ -150,7 +167,6 @@ export class GlobalpingService {
             latencia: result.result.timeTaken ? `${Math.round(result.result.timeTaken)}ms` : '0ms',
             status: 'OK',
           });
-          successCount++;
         } else {
           console.log(`[GlobalPing DNS] Sem resposta para ${dominio} em ${location}`);
         }
