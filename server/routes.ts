@@ -63,9 +63,14 @@ export async function registerRoutes(
         });
       }
 
-      res.status(500).json({
-        erro: "Erro ao executar diagnóstico",
-        detalhes: error instanceof Error ? error.message : String(error),
+      const mensagemErro = error instanceof Error ? error.message : String(error);
+      const statusCode = mensagemErro.includes("inválido") ? 400 : 500;
+      
+      res.status(statusCode).json({
+        erro: mensagemErro.includes("inválido") 
+          ? "Domínio inválido" 
+          : "Erro ao executar diagnóstico",
+        detalhes: mensagemErro,
       });
     }
   });
