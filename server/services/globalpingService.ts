@@ -172,6 +172,12 @@ export class GlobalpingService {
         return null;
       }
 
+      // Check for error in result
+      if (result.error) {
+        console.log(`[GlobalPing DNS] Error in result for ${countryCode}: ${result.error}`);
+        return null;
+      }
+
       // Extract DNS answers
       const answers = result?.answers || [];
       if (answers.length === 0) {
@@ -180,14 +186,29 @@ export class GlobalpingService {
       }
 
       const answer = answers[0];
+      
+      // Try multiple fields for IP data
+      let ipAddress = answer.data || answer.address || '';
+      
+      console.log(`[GlobalPing DNS] Answer for ${countryCode}: type=${answer.type}, data=${answer.data}, address=${answer.address}`);
+
+      // Validate that we got a valid IP address
+      // IPv4: 4 octets, IPv6: hex with colons
+      const ipv4Regex = /^(\d{1,3}\.){3}\d{1,3}$/;
+      const ipv6Regex = /^([a-f0-9]{0,4}:){2,7}[a-f0-9]{0,4}$/i;
+
+      if (!ipAddress || (!ipv4Regex.test(ipAddress) && !ipv6Regex.test(ipAddress))) {
+        console.log(`[GlobalPing DNS] Invalid IP address for ${countryCode}: ${ipAddress}`);
+        return null;
+      }
 
       return {
         probe_id: probeId,
         region: countryCode,
-        ip: answer.data || 'N/A',
+        ip: ipAddress,
         asn: `AS${probe.asn || '15169'}`,
         isp: probe.network || `ISP ${countryCode}`,
-        reverse_dns: answer.data || 'N/A',
+        reverse_dns: ipAddress,
         latencia: result?.timeTaken ? `${Math.round(result.timeTaken)}ms` : '0ms',
         status: 'OK',
       };
@@ -228,6 +249,13 @@ export class GlobalpingService {
       }
 
       const avgLatency = stats.avg || 0;
+      const loss = stats.loss || 0;
+
+      // Reject if ping failed (0 latency, 100% loss, or error status)
+      if (avgLatency <= 0 || loss === 100) {
+        console.log(`[GlobalPing Ping] Rejected failed ping for ${countryCode}: latency=${avgLatency}ms, loss=${loss}%`);
+        return null;
+      }
 
       return {
         probe_id: probeId,
@@ -238,8 +266,8 @@ export class GlobalpingService {
         reverse_dns: target,
         latencia: `${Math.round(avgLatency)}ms`,
         velocidade: avgLatency < 30 ? 'Rápida' : avgLatency < 60 ? 'Normal' : 'Lenta',
-        perda_pacotes: `${stats.loss || 0}%`,
-        status: avgLatency > 0 ? 'OK' : 'ERRO',
+        perda_pacotes: `${loss}%`,
+        status: 'OK',
       };
     } catch (error) {
       console.error(`[GlobalPing Ping] Parse error for ${countryCode}:`, error);
@@ -249,12 +277,6 @@ export class GlobalpingService {
 
   private parsePingOutput(rawOutput: string): { avg: number; loss: number; resolvedAddress?: string } | null {
     try {
-      // Example: "PING google.com (172.217.12.46) 56(84) bytes of data.
-      // 64 bytes from 172.217.12.46: icmp_seq=1 ttl=119 time=8.77 ms
-      // --- google.com statistics ---
-      // 4 packets transmitted, 4 received, 0% packet loss, time 3005ms
-      // rtt min/avg/max/stddev = 8.77/9.55/10.28/0.63 ms"
-
       const resolvedMatch = rawOutput.match(/\((\d+\.\d+\.\d+\.\d+)\)/);
       const resolvedAddress = resolvedMatch ? resolvedMatch[1] : undefined;
 
