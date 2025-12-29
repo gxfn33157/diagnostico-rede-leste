@@ -2,315 +2,232 @@ import axios from 'axios';
 import type { ProbeResult } from '@shared/schema';
 
 const GLOBALPING_API = 'https://api.globalping.io';
+const PROBES_POR_PAIS = 3;
 
 export class GlobalpingService {
   private apiKey: string;
 
   constructor(apiKey?: string) {
     this.apiKey = apiKey || process.env.GLOBALPING_API_TOKEN || '';
-    console.log('[GlobalPing Service] API Token configured:', this.apiKey ? 'YES' : 'NO');
+    console.log('[GlobalPing] API Token:', this.apiKey ? 'OK' : 'NÃO CONFIGURADO');
   }
 
   async executeDiagnostico(dominio: string, escopo: string, limite: number) {
-    try {
-      console.log(`[GlobalPing] Iniciando diagnóstico: ${dominio} (${escopo}, ${limite} locais)`);
-
-      if (!this.isValidDomain(dominio)) {
-        throw new Error(`Domínio inválido: ${dominio}`);
-      }
-
-      const locations = this.getLocations(escopo, limite);
-      console.log(`[GlobalPing] Usando ${locations.length} locais`);
-
-      let allResults: ProbeResult[] = [];
-      
-      // Execute DNS measurements
-      for (let i = 0; i < locations.length; i++) {
-        const countryCode = locations[i];
-        try {
-          const dnsResult = await this.executeMeasurement(dominio, 'dns', countryCode, i);
-          if (dnsResult) {
-            allResults.push(dnsResult);
-          }
-        } catch (error) {
-          console.error(`[GlobalPing] DNS measurement failed for ${countryCode}:`, error);
-        }
-      }
-
-      // Execute Ping measurements
-      for (let i = 0; i < locations.length; i++) {
-        const countryCode = locations[i];
-        try {
-          const pingResult = await this.executeMeasurement(dominio, 'ping', countryCode, i + 100);
-          if (pingResult) {
-            allResults.push(pingResult);
-          }
-        } catch (error) {
-          console.error(`[GlobalPing] Ping measurement failed for ${countryCode}:`, error);
-        }
-      }
-      
-      if (allResults.length === 0) {
-        throw new Error(`Não foi possível obter dados reais do domínio ${dominio}. Verifique se ele existe ou tente novamente.`);
-      }
-
-      const resumo = `Diagnóstico completado com ${allResults.length} medições de ${locations.length} locais`;
-
-      return {
-        resumo,
-        resultados: allResults,
-        totalProbes: allResults.length,
-      };
-    } catch (error) {
-      console.error('[GlobalPing] Erro:', error);
-      throw error;
+    if (!this.isValidDomain(dominio)) {
+      throw new Error(`Domínio inválido: ${dominio}`);
     }
+
+    const locations = this.getLocations(escopo, limite);
+    let resultados: ProbeResult[] = [];
+
+    for (let i = 0; i < locations.length; i++) {
+      const country = locations[i];
+
+      for (let p = 0; p < PROBES_POR_PAIS; p++) {
+        const baseId = i * 10 + p;
+
+        const dns = await this.executeMeasurement(dominio, 'dns', country, baseId);
+        if (dns) resultados.push(dns);
+
+        const ping = await this.executeMeasurement(dominio, 'ping', country, baseId + 100);
+        if (ping) resultados.push(ping);
+      }
+    }
+
+    if (resultados.length === 0) {
+      throw new Error('Nenhuma medição válida retornada.');
+    }
+
+    const resumo = this.gerarResumo(resultados);
+
+    return {
+      resumo,
+      resultados,
+      totalProbes: resultados.length,
+    };
   }
 
-  private async executeMeasurement(target: string, type: 'dns' | 'ping', countryCode: string, probeId: number): Promise<ProbeResult | null> {
-    const payload = {
-      type,
-      target,
-      locations: [{ country: countryCode }],
-    };
+  // =========================
+  // MEDIÇÃO
+  // =========================
 
-    console.log(`[GlobalPing ${type.toUpperCase()}] Enviando para ${countryCode}:`, JSON.stringify(payload));
-
+  private async executeMeasurement(
+    target: string,
+    type: 'dns' | 'ping',
+    country: string,
+    probeId: number
+  ): Promise<ProbeResult | null> {
     try {
-      // Step 1: Send measurement request (returns 202 Accepted)
-      const createResponse = await axios.post(
+      const create = await axios.post(
         `${GLOBALPING_API}/v1/measurements`,
-        payload,
+        {
+          type,
+          target,
+          locations: [{ country }],
+        },
         {
           headers: {
-            'Authorization': `Bearer ${this.apiKey}`,
+            Authorization: `Bearer ${this.apiKey}`,
             'Content-Type': 'application/json',
           },
           timeout: 15000,
         }
       );
 
-      console.log(`[GlobalPing ${type.toUpperCase()}] Status ${createResponse.status} de ${countryCode}`);
+      const measurementId = create.data?.id;
+      if (!measurementId) return null;
 
-      // Extract measurement ID from response
-      const measurementId = createResponse.data?.id;
-      if (!measurementId) {
-        console.error(`[GlobalPing ${type.toUpperCase()}] No measurement ID returned for ${countryCode}`);
-        return null;
-      }
+      for (let i = 0; i < 30; i++) {
+        await new Promise(r => setTimeout(r, 500));
 
-      console.log(`[GlobalPing ${type.toUpperCase()}] Measurement ID: ${measurementId}`);
-
-      // Step 2: Poll for results (wait up to 10 seconds)
-      const maxRetries = 30;
-      let retries = 0;
-      let fullResponse = null;
-
-      while (retries < maxRetries) {
-        await new Promise(resolve => setTimeout(resolve, 500)); // Wait 500ms between polls
-        
-        try {
-          const getResponse = await axios.get(
-            `${GLOBALPING_API}/v1/measurements/${measurementId}`,
-            {
-              headers: {
-                'Authorization': `Bearer ${this.apiKey}`,
-              },
-              timeout: 10000,
-            }
-          );
-
-          console.log(`[GlobalPing ${type.toUpperCase()}] Poll attempt ${retries + 1}: status=${getResponse.data?.status}`);
-
-          if (getResponse.data?.status === 'completed' || getResponse.data?.status === 'finished') {
-            fullResponse = getResponse.data;
-            console.log(`[GlobalPing ${type.toUpperCase()}] Got result for ${countryCode}:`, JSON.stringify(fullResponse).substring(0, 400));
-            break;
+        const poll = await axios.get(
+          `${GLOBALPING_API}/v1/measurements/${measurementId}`,
+          {
+            headers: { Authorization: `Bearer ${this.apiKey}` },
           }
-        } catch (pollError) {
-          console.error(`[GlobalPing ${type.toUpperCase()}] Poll error:`, pollError);
+        );
+
+        if (poll.data?.status === 'finished' || poll.data?.status === 'completed') {
+          return type === 'dns'
+            ? this.parseDNS(poll.data, country, probeId)
+            : this.parsePing(poll.data, country, probeId);
         }
-
-        retries++;
       }
 
-      if (!fullResponse) {
-        console.error(`[GlobalPing ${type.toUpperCase()}] No result after ${maxRetries} retries for ${countryCode}`);
-        return null;
-      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
 
-      // Step 3: Parse result based on type
-      if (type === 'dns') {
-        return this.parseDNSResult(fullResponse, countryCode, probeId);
-      } else {
-        return this.parsePingResult(fullResponse, target, countryCode, probeId);
-      }
+  // =========================
+  // PARSE DNS
+  // =========================
 
-    } catch (error: any) {
-      console.error(`[GlobalPing ${type.toUpperCase()}] Error for ${countryCode}:`,
-        error.response?.status,
-        JSON.stringify(error.response?.data || error.message)
+  private parseDNS(data: any, country: string, probeId: number): ProbeResult | null {
+    const r = data?.results?.[0];
+    if (!r?.result?.answers?.length) return null;
+
+    const ip = r.result.answers[0].data;
+    const probe = r.probe || {};
+
+    return {
+      probe_id: probeId,
+      region: country,
+      ip,
+      asn: `AS${probe.asn || 'N/A'}`,
+      isp: probe.network || 'ISP desconhecido',
+      acessibilidade: 'Acessível',
+      latencia: '0ms',
+      jitter: '0ms',
+      velocidade: 'Normal',
+      perda_pacotes: '0%',
+      status: 'OK',
+    };
+  }
+
+  // =========================
+  // PARSE PING + JITTER
+  // =========================
+
+  private parsePing(data: any, country: string, probeId: number): ProbeResult | null {
+    const r = data?.results?.[0];
+    if (!r?.result) return null;
+
+    const stats = r.result.stats;
+    if (!stats || stats.loss === 100) return null;
+
+    const avg = Math.round(stats.avg || 0);
+    const min = Math.round(stats.min || avg);
+    const max = Math.round(stats.max || avg);
+    const jitter = Math.abs(max - min);
+
+    let status: 'OK' | 'AVISO' | 'ERRO' = 'OK';
+    let acessibilidade = 'Acessível';
+
+    if (avg > 200 || stats.loss > 5) {
+      status = 'AVISO';
+      acessibilidade = 'Instabilidade detectada';
+    }
+    if (avg > 500 || stats.loss > 20) {
+      status = 'ERRO';
+      acessibilidade = 'Inacessível';
+    }
+
+    let velocidade: 'Rápida' | 'Normal' | 'Lenta' = 'Normal';
+    if (avg < 30) velocidade = 'Rápida';
+    if (avg > 100) velocidade = 'Lenta';
+
+    return {
+      probe_id: probeId,
+      region: country,
+      ip: stats.resolvedAddress || 'N/A',
+      asn: `AS${r.probe?.asn || 'N/A'}`,
+      isp: r.probe?.network || 'ISP desconhecido',
+      acessibilidade,
+      latencia: `${avg}ms`,
+      jitter: `${jitter}ms`,
+      velocidade,
+      perda_pacotes: `${stats.loss}%`,
+      status,
+    };
+  }
+
+  // =========================
+  // RESUMO AUTOMÁTICO
+  // =========================
+
+  private gerarResumo(resultados: ProbeResult[]): string {
+    const porPais: Record<string, ProbeResult[]> = {};
+
+    resultados.forEach(r => {
+      if (!porPais[r.region]) porPais[r.region] = [];
+      porPais[r.region].push(r);
+    });
+
+    const alertas: string[] = [];
+
+    for (const pais in porPais) {
+      const probes = porPais[pais];
+      const erros = probes.filter(p => p.status === 'ERRO');
+      const avisos = probes.filter(p => p.status === 'AVISO');
+
+      const ispsAfetados = new Set(
+        [...erros, ...avisos].map(p => p.isp)
       );
-      return null;
+
+      if (erros.length > 0) {
+        alertas.push(
+          `🚨 ${pais}: Falha crítica detectada (${[...ispsAfetados].join(', ')})`
+        );
+      } else if (avisos.length > 0) {
+        alertas.push(
+          `⚠️ ${pais}: Instabilidade em alguns provedores (${[...ispsAfetados].join(', ')})`
+        );
+      }
     }
-  }
 
-  private parseDNSResult(response: any, countryCode: string, probeId: number): ProbeResult | null {
-    try {
-      // Extract first result from the array
-      const resultObj = response?.results?.[0];
-      if (!resultObj) {
-        console.log(`[GlobalPing DNS] No results array for ${countryCode}`);
-        return null;
-      }
-
-      const result = resultObj.result;
-      const probe = resultObj.probe || {};
-
-      if (!result) {
-        console.log(`[GlobalPing DNS] No result field in results[0] for ${countryCode}`);
-        return null;
-      }
-
-      // Check for error in result
-      if (result.error) {
-        console.log(`[GlobalPing DNS] Error in result for ${countryCode}: ${result.error}`);
-        return null;
-      }
-
-      // Extract DNS answers
-      const answers = result?.answers || [];
-      if (answers.length === 0) {
-        console.log(`[GlobalPing DNS] No answers in result for ${countryCode}`);
-        return null;
-      }
-
-      const answer = answers[0];
-      
-      // Try multiple fields for IP data
-      let ipAddress = answer.data || answer.address || '';
-      
-      console.log(`[GlobalPing DNS] Answer for ${countryCode}: type=${answer.type}, data=${answer.data}, address=${answer.address}`);
-
-      // Validate that we got a valid IP address
-      // IPv4: 4 octets, IPv6: hex with colons
-      const ipv4Regex = /^(\d{1,3}\.){3}\d{1,3}$/;
-      const ipv6Regex = /^([a-f0-9]{0,4}:){2,7}[a-f0-9]{0,4}$/i;
-
-      if (!ipAddress || (!ipv4Regex.test(ipAddress) && !ipv6Regex.test(ipAddress))) {
-        console.log(`[GlobalPing DNS] Invalid IP address for ${countryCode}: ${ipAddress}`);
-        return null;
-      }
-
-      return {
-        probe_id: probeId,
-        region: countryCode,
-        ip: ipAddress,
-        asn: `AS${probe.asn || '15169'}`,
-        isp: probe.network || `ISP ${countryCode}`,
-        reverse_dns: ipAddress,
-        latencia: result?.timeTaken ? `${Math.round(result.timeTaken)}ms` : '0ms',
-        status: 'OK',
-      };
-    } catch (error) {
-      console.error(`[GlobalPing DNS] Parse error for ${countryCode}:`, error);
-      return null;
+    if (alertas.length === 0) {
+      return '✅ Nenhuma instabilidade detectada. Conectividade normal em todas as regiões testadas.';
     }
+
+    return alertas.join(' | ');
   }
 
-  private parsePingResult(response: any, target: string, countryCode: string, probeId: number): ProbeResult | null {
-    try {
-      // Extract first result from the array
-      const resultObj = response?.results?.[0];
-      if (!resultObj) {
-        console.log(`[GlobalPing Ping] No results array for ${countryCode}`);
-        return null;
-      }
+  // =========================
+  // UTIL
+  // =========================
 
-      const result = resultObj.result;
-      const probe = resultObj.probe || {};
-
-      if (!result) {
-        console.log(`[GlobalPing Ping] No result field in results[0] for ${countryCode}`);
-        return null;
-      }
-
-      // Try to parse stats first, otherwise extract from rawOutput
-      let stats = result?.stats;
-      
-      if (!stats && result?.rawOutput) {
-        // Parse ping raw output to extract latency and packet loss
-        stats = this.parsePingOutput(result.rawOutput);
-      }
-
-      if (!stats) {
-        console.log(`[GlobalPing Ping] No stats data for ${countryCode}`);
-        return null;
-      }
-
-      const avgLatency = stats.avg || 0;
-      const loss = stats.loss || 0;
-
-      // Reject if ping failed (0 latency, 100% loss, or error status)
-      if (avgLatency <= 0 || loss === 100) {
-        console.log(`[GlobalPing Ping] Rejected failed ping for ${countryCode}: latency=${avgLatency}ms, loss=${loss}%`);
-        return null;
-      }
-
-      return {
-        probe_id: probeId,
-        region: countryCode,
-        ip: stats.resolvedAddress || result?.resolvedAddress || 'N/A',
-        asn: `AS${probe.asn || '15169'}`,
-        isp: probe.network || `ISP ${countryCode}`,
-        reverse_dns: target,
-        latencia: `${Math.round(avgLatency)}ms`,
-        velocidade: avgLatency < 30 ? 'Rápida' : avgLatency < 60 ? 'Normal' : 'Lenta',
-        perda_pacotes: `${loss}%`,
-        status: 'OK',
-      };
-    } catch (error) {
-      console.error(`[GlobalPing Ping] Parse error for ${countryCode}:`, error);
-      return null;
-    }
+  private isValidDomain(domain: string): boolean {
+    return /^([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}$/.test(domain);
   }
 
-  private parsePingOutput(rawOutput: string): { avg: number; loss: number; resolvedAddress?: string } | null {
-    try {
-      const resolvedMatch = rawOutput.match(/\((\d+\.\d+\.\d+\.\d+)\)/);
-      const resolvedAddress = resolvedMatch ? resolvedMatch[1] : undefined;
-
-      const lossMatch = rawOutput.match(/(\d+)%\s+packet loss/);
-      const loss = lossMatch ? parseInt(lossMatch[1]) : 0;
-
-      const avgMatch = rawOutput.match(/avg[=/\s]+(\d+\.?\d*)/);
-      const avg = avgMatch ? parseFloat(avgMatch[1]) : 0;
-
-      return {
-        avg,
-        loss,
-        resolvedAddress,
-      };
-    } catch (error) {
-      console.error('[GlobalPing] Parse ping output error:', error);
-      return null;
-    }
-  }
-
-  private isValidDomain(dominio: string): boolean {
-    const domainRegex = /^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/;
-    return domainRegex.test(dominio);
-  }
-
-  private getLocations(escopo: string, limite: number): string[] {
-    const locations: { [key: string]: string[] } = {
-      GLOBAL: ['US', 'DE', 'JP', 'BR', 'AU', 'SG', 'IN', 'CA', 'MX', 'GB'],
-      BR: ['BR', 'BR', 'BR', 'BR', 'BR', 'BR', 'BR', 'BR', 'BR', 'BR'],
-      AWS: ['US', 'DE', 'JP', 'BR', 'CA', 'US', 'DE', 'IN'],
-      AZURE: ['US', 'DE', 'JP', 'BR', 'CA', 'GB', 'FR', 'DE'],
+  private getLocations(scope: string, limit: number): string[] {
+    const map: Record<string, string[]> = {
+      GLOBAL: ['US', 'BR', 'DE', 'JP', 'SG', 'GB', 'CA', 'AU'],
+      BR: ['BR', 'BR', 'BR', 'BR', 'BR'],
     };
 
-    const selected = locations[escopo] || locations.GLOBAL;
-    return selected.slice(0, limite);
+    return (map[scope] || map.GLOBAL).slice(0, limit);
   }
 }
