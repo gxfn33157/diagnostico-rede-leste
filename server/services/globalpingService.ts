@@ -264,7 +264,7 @@ export class GlobalpingService {
         const resolvedIp = stats.resolvedAddress || result?.resolvedAddress || 'N/A';
         const jitter = stats.jitter || 0;
 
-        // Reject if ping failed (0 latency, 100% loss, or error status)
+        // Reject if ping failed (0 latency, 100% loss, or error status) ✅ VALIDAÇÃO ATIVA
         if (avgLatency <= 0 || loss === 100) {
           console.log(`[GlobalPing Ping] Rejected failed ping for result ${i}: latency=${avgLatency}ms, loss=${loss}%`);
           continue;
@@ -332,51 +332,5 @@ export class GlobalpingService {
 
   private parsePingOutput(rawOutput: string): { avg: number; loss: number; jitter: number; resolvedAddress?: string } | null {
     try {
-      // Example: "PING google.com (172.217.12.46) 56(84) bytes of data.
-      // 64 bytes from 172.217.12.46: icmp_seq=1 ttl=119 time=8.77 ms
-      // --- google.com statistics ---
-      // 4 packets transmitted, 4 received, 0% packet loss, time 3005ms
-      // rtt min/avg/max/stddev = 8.77/9.55/10.28/0.63 ms"
-
       const resolvedMatch = rawOutput.match(/\((\d+\.\d+\.\d+\.\d+)\)/);
-      const resolvedAddress = resolvedMatch ? resolvedMatch[1] : undefined;
-
-      const lossMatch = rawOutput.match(/(\d+)%\s+packet loss/);
-      const loss = lossMatch ? parseInt(lossMatch[1]) : 0;
-
-      const avgMatch = rawOutput.match(/avg[=/\s]+(\d+\.?\d*)/);
-      const avg = avgMatch ? parseFloat(avgMatch[1]) : 0;
-
-      // Extract jitter (stddev) - important for VoIP quality
-      const stddevMatch = rawOutput.match(/stddev[=/\s]+(\d+\.?\d*)/);
-      const jitter = stddevMatch ? parseFloat(stddevMatch[1]) : 0;
-
-      return {
-        avg,
-        loss,
-        jitter,
-        resolvedAddress,
-      };
-    } catch (error) {
-      console.error('[GlobalPing] Parse ping output error:', error);
-      return null;
-    }
-  }
-
-  private isValidDomain(dominio: string): boolean {
-    const domainRegex = /^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/;
-    return domainRegex.test(dominio);
-  }
-
-  private getLocations(escopo: string, limite: number): string[] {
-    const locations: { [key: string]: string[] } = {
-      GLOBAL: ['US', 'DE', 'JP', 'BR', 'AU', 'SG', 'IN', 'CA', 'MX', 'GB'],
-      BR: ['BR', 'BR', 'BR', 'BR', 'BR', 'BR', 'BR', 'BR', 'BR', 'BR'],
-      AWS: ['US', 'DE', 'JP', 'BR', 'CA', 'US', 'DE', 'IN'],
-      AZURE: ['US', 'DE', 'JP', 'BR', 'CA', 'GB', 'FR', 'DE'],
-    };
-
-    const selected = locations[escopo] || locations.GLOBAL;
-    return selected.slice(0, limite);
-  }
-}
+      const
