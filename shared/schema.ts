@@ -48,6 +48,6 @@ export interface ProbeResult {
   latencia: string;
   velocidade: "Rápida" | "Normal" | "Lenta"; // Classificação
   perda_pacotes: string; // "0%", "1-5%", ">5%"
-  certificado_ssl: string; // "Válido", "Inválido", "Não verificado"
+  jitter: string; // Variação de latência em ms - importante para VoIP
   status: "OK" | "AVISO" | "ERRO";
 }
