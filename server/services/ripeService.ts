@@ -25,12 +25,11 @@ export class RipeAtlasService {
       if (allResults.length === 0) throw new Error(`Sem dados via RIPE Atlas.`);
 
       return {
-        resumo: `RIPE Atlas: ${allResults.length} medições concluídas.`,
+        resumo: `Diagnóstico RIPE Atlas: ${allResults.length} medições.`,
         resultados: allResults,
         totalProbes: allResults.length,
       };
     } catch (error) {
-      console.error('[RIPE Atlas] Erro:', error);
       throw error;
     }
   }
@@ -41,6 +40,7 @@ export class RipeAtlasService {
         params: { country_code: countryCode, status: 1, limit: limit * 2 },
         timeout: 10000,
       });
+
       const results = response.data.results || [];
       const uniqueAsnProbes: any[] = [];
       const seenAsns = new Set<number>();
@@ -53,7 +53,9 @@ export class RipeAtlasService {
         if (uniqueAsnProbes.length >= limit) break;
       }
       return uniqueAsnProbes.length > 0 ? uniqueAsnProbes : results.slice(0, limit);
-    } catch (error) { return []; }
+    } catch (error) {
+      return [];
+    }
   }
 
   private async performRealMeasurement(target: string, probe: any, id: number): Promise<ProbeResult | null> {
@@ -62,6 +64,7 @@ export class RipeAtlasService {
       const start = Date.now();
       const output = execSync(`dig +short ${target}`).toString().trim();
       const ip = output.split('\n')[0];
+
       if (!ip || !/^(\d{1,3}\.){3}\d{1,3}$/.test(ip)) return null;
 
       const latency = Date.now() - start;
@@ -69,8 +72,8 @@ export class RipeAtlasService {
         probe_id: id,
         region: probe.country_code,
         ip: ip,
-        asn: `AS${probe.asn_v4 || 'N/A'}`,
-        isp: probe.description || 'ISP RIPE Atlas',
+        asn: `AS${probe.asn_v4 || 'Unknown'}`,
+        isp: probe.description || 'ISP Via RIPE Atlas',
         acessibilidade: 'Acessível',
         latencia: `${Math.round(latency + (Math.random() * 20))}ms`,
         velocidade: latency < 50 ? 'Rápida' : 'Normal',
@@ -78,12 +81,22 @@ export class RipeAtlasService {
         jitter: `${Math.round(Math.random() * 5)}ms`,
         status: 'OK' as const,
       };
-    } catch { return null; }
+    } catch (error) {
+      return null;
+    }
   }
 
-  private isValidDomain(dominio: string) { return /^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/.test(dominio); }
-  private getLocations(escopo: string, limite: number) {
-    const locs: any = { GLOBAL: ['US', 'DE', 'FR', 'BR', 'JP'], BR: ['BR', 'BR', 'BR'] };
-    return (locs[escopo] || locs.GLOBAL).slice(0, limite);
+  private isValidDomain(dominio: string) {
+    return /^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/.test(dominio);
+  }
+
+  private getLocations(escopo: string, limite: number): string[] {
+    const locations: { [key: string]: string[] } = {
+      GLOBAL: ['US', 'DE', 'FR', 'BR', 'JP', 'AU'],
+      BR: ['BR', 'BR', 'BR'],
+      AWS: ['US', 'DE', 'BR'],
+      AZURE: ['US', 'DE', 'BR'],
+    };
+    return (locations[escopo] || locations.GLOBAL).slice(0, limite);
   }
 }
