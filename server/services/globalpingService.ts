@@ -12,6 +12,8 @@ export class GlobalpingService {
 
   async executeDiagnostico(dominio: string, escopo: string, limite: number) {
     try {
+      if (!this.isValidDomain(dominio)) throw new Error(`Domínio inválido: ${dominio}`);
+
       const locations = this.getLocations(escopo, limite);
       let allResults: ProbeResult[] = [];
       const seenAsns = new Set<string>();
@@ -20,11 +22,10 @@ export class GlobalpingService {
       for (let i = 0; i < locations.length; i++) {
         const countryCode = locations[i];
         try {
-          // Solicita 10 probes para ter candidatos suficientes para diversificar
           const dnsResults = await this.executeMeasurement(dominio, 'dns', countryCode, i * 100, 10);
           if (dnsResults) {
             for (const res of dnsResults) {
-              if (!seenAsns.has(res.asn) && !seenIps.has(res.ip)) {
+              if (res.ip && res.ip !== 'N/A' && !seenAsns.has(res.asn) && !seenIps.has(res.ip)) {
                 allResults.push(res);
                 seenAsns.add(res.asn);
                 seenIps.add(res.ip);
@@ -32,9 +33,7 @@ export class GlobalpingService {
               }
             }
           }
-        } catch (error) {
-          console.error(`[GlobalPing] DNS failed for ${countryCode}`);
-        }
+        } catch (error) { console.error(`[GlobalPing] DNS failed for ${countryCode}`); }
         if (allResults.length >= limite) break;
       }
 
@@ -45,7 +44,7 @@ export class GlobalpingService {
             const pingResults = await this.executeMeasurement(dominio, 'ping', countryCode, 1000 + i * 100, 10);
             if (pingResults) {
               for (const res of pingResults) {
-                if (!seenAsns.has(res.asn) && !seenIps.has(res.ip)) {
+                if (res.ip && res.ip !== 'N/A' && !seenAsns.has(res.asn) && !seenIps.has(res.ip)) {
                   allResults.push(res);
                   seenAsns.add(res.asn);
                   seenIps.add(res.ip);
@@ -53,15 +52,13 @@ export class GlobalpingService {
                 }
               }
             }
-          } catch (error) {
-            console.error(`[GlobalPing] Ping failed for ${countryCode}`);
-          }
+          } catch (error) { console.error(`[GlobalPing] Ping failed for ${countryCode}`); }
           if (allResults.length >= limite) break;
         }
       }
       
-      if (allResults.length === 0) throw new Error("Sem dados reais obtidos.");
-      return { resumo: `Sucesso: ${allResults.length} medições diversificadas`, resultados: allResults, totalProbes: allResults.length };
+      if (allResults.length === 0) throw new Error(`O domínio ${dominio} não retornou nenhum IP válido.`);
+      return { resumo: `Sucesso: ${allResults.length} medições.`, resultados: allResults, totalProbes: allResults.length };
     } catch (error) { throw error; }
   }
 
@@ -71,20 +68,20 @@ export class GlobalpingService {
         { type, target, locations: [{ country: countryCode }], limit },
         { headers: { 'Authorization': `Bearer ${this.apiKey}`, 'Content-Type': 'application/json' }, timeout: 15000 }
       );
-      const measurementId = createResponse.data?.id;
-      if (!measurementId) return null;
+      const mId = createResponse.data?.id;
+      if (!mId) return null;
 
-      let fullResponse = null;
+      let resp = null;
       for (let r = 0; r < 20; r++) {
         await new Promise(resolve => setTimeout(resolve, 1000));
-        const getResponse = await axios.get(`${GLOBALPING_API}/v1/measurements/${measurementId}`);
-        if (getResponse.data?.status === 'completed' || getResponse.data?.status === 'finished') {
-          fullResponse = getResponse.data;
+        const getRes = await axios.get(`${GLOBALPING_API}/v1/measurements/${mId}`);
+        if (getRes.data?.status === 'completed' || getRes.data?.status === 'finished') {
+          resp = getRes.data;
           break;
         }
       }
-      if (!fullResponse) return null;
-      return type === 'dns' ? this.parseDNSResults(fullResponse, countryCode, probeId) : this.parsePingResults(fullResponse, target, countryCode, probeId);
+      if (!resp) return null;
+      return type === 'dns' ? this.parseDNSResults(resp, countryCode, probeId) : this.parsePingResults(resp, target, countryCode, probeId);
     } catch (error) { return null; }
   }
 
@@ -94,7 +91,7 @@ export class GlobalpingService {
       const result = resObj.result;
       const probe = resObj.probe || {};
       const ip = result?.answers?.[0]?.data || result?.answers?.[0]?.address;
-      if (ip) {
+      if (ip && /^(\d{1,3}\.){3}\d{1,3}$/.test(ip)) {
         results.push({
           probe_id: probeId + i, region: countryCode, ip, 
           asn: `AS${probe.asn || 'Unknown'}`, isp: probe.network || 'ISP Desconhecido',
@@ -112,9 +109,10 @@ export class GlobalpingService {
       const result = resObj.result;
       const probe = resObj.probe || {};
       const stats = result?.stats || (result?.rawOutput ? this.parsePingOutput(result.rawOutput) : null);
-      if (stats && stats.loss < 100) {
+      const ip = stats?.resolvedAddress || result?.resolvedAddress;
+      if (stats && stats.loss < 100 && ip && /^(\d{1,3}\.){3}\d{1,3}$/.test(ip)) {
         results.push({
-          probe_id: probeId + i, region: countryCode, ip: stats.resolvedAddress || 'N/A',
+          probe_id: probeId + i, region: countryCode, ip,
           asn: `AS${probe.asn || 'Unknown'}`, isp: probe.network || 'ISP Desconhecido',
           acessibilidade: 'Acessível', latencia: `${Math.round(stats.avg)}ms`,
           velocidade: stats.avg < 50 ? 'Rápida' : 'Normal', perda_pacotes: `${stats.loss}%`,
@@ -132,8 +130,12 @@ export class GlobalpingService {
     return { avg: avg ? parseFloat(avg[1]) : 0, loss: loss ? parseInt(loss[1]) : 0, jitter: 0, resolvedAddress: resolved ? resolved[1] : undefined };
   }
 
-  private getLocations(escopo: string, limite: number) {
-    const locs: any = { GLOBAL: ['US', 'DE', 'JP', 'BR', 'AU', 'SG'], BR: ['BR'] };
+  private isValidDomain(dominio: string): boolean {
+    return /^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/.test(dominio);
+  }
+
+  private getLocations(escopo: string, limite: number): string[] {
+    const locs: any = { GLOBAL: ['US', 'DE', 'JP', 'BR', 'AU', 'SG', 'IN', 'CA', 'MX', 'GB'], BR: ['BR'] };
     return locs[escopo] || locs.GLOBAL;
   }
 }
